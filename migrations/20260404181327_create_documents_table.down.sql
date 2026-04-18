@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS documents;
+
+DROP ENUM IF EXISTS document_status CASCADE;
