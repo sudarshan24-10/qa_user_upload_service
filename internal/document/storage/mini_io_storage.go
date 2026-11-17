@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -37,6 +38,41 @@ func (s *MiniIOStorage) CheckObjectExists(ctx context.Context, objectKey string)
 		return false, err
 	}
 	return true, nil
+}
+
+// InspectObject stats the object and reads up to headBytes from its start.
+// Returns (nil, nil) when the object does not exist.
+func (s *MiniIOStorage) InspectObject(ctx context.Context, objectKey string, headBytes int64) (*ObjectInfo, error) {
+	stat, err := s.Client.StatObject(ctx, s.BucketName, objectKey, minio.StatObjectOptions{})
+	if err != nil {
+		if minio.ToErrorResponse(err).Code == "NoSuchKey" {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	n := headBytes
+	if stat.Size < n {
+		n = stat.Size
+	}
+
+	head := make([]byte, n)
+	if n > 0 {
+		opts := minio.GetObjectOptions{}
+		if err := opts.SetRange(0, n-1); err != nil {
+			return nil, err
+		}
+		obj, err := s.Client.GetObject(ctx, s.BucketName, objectKey, opts)
+		if err != nil {
+			return nil, err
+		}
+		defer obj.Close()
+		if _, err := io.ReadFull(obj, head); err != nil {
+			return nil, err
+		}
+	}
+
+	return &ObjectInfo{Size: stat.Size, Head: head}, nil
 }
 
 func (s *MiniIOStorage) DeleteObject(ctx context.Context, objectKey string) error {

@@ -2,7 +2,7 @@ package dto
 
 type InitiateUploadRequest struct {
 	UserID         string            `json:"user_id" validate:"required"`
-	FileName       string            `json:"file_name" validate:"required"`
+	FileName       string            `json:"file_name" validate:"required,max=255"`
 	ContentType    string            `json:"content_type" validate:"required"`
 	Size           int64             `json:"size" validate:"gt=0"`
 	Metadata       map[string]string `json:"metadata"`
@@ -27,11 +27,11 @@ type CompleteUploadResponse struct {
 	Status     string `json:"status"`
 }
 
-type FailedUploadRequest struct {
-	DocumentID     string `json:"document_id" validate:"required"`
-	UserID         string `json:"user_id" validate:"required"`
-	IdempotencyKey string `json:"idempotency_key" validate:"required"`
-	FailedReason   string `json:"failed_reason" validate:"required"`
+type MarkDocumentFailedRequest struct {
+	DocumentID    string `json:"document_id" validate:"required"`
+	UserID        string `json:"user_id" validate:"required"`
+	FailureStage  string `json:"failure_stage" validate:"required"`
+	FailureReason string `json:"failure_reason" validate:"required"`
 }
 
 type GetDocumentRequest struct {

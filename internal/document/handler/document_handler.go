@@ -1,10 +1,13 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 	"github.com/sudarshan24-10/qa_user_upload_service/internal/document/dto"
+	"github.com/sudarshan24-10/qa_user_upload_service/internal/document/model"
 	"github.com/sudarshan24-10/qa_user_upload_service/internal/document/service"
 )
 
@@ -28,7 +31,7 @@ func (h *UploadHandler) InitiateUpload(c *gin.Context) {
 
 	res, err := h.service.InitiateUpload(c.Request.Context(), req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(httpStatusFromError(err), gin.H{"error": err.Error()})
 		return
 	}
 
@@ -47,31 +50,37 @@ func (h *UploadHandler) CompleteUpload(c *gin.Context) {
 
 	res, err := h.service.CompleteUpload(c.Request.Context(), req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(httpStatusFromError(err), gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, res)
 }
 
-// -------------------- FAIL --------------------
+// -------------------- MARK FAILED --------------------
 
-func (h *UploadHandler) FailUpload(c *gin.Context) {
-	var req dto.FailedUploadRequest
+func (h *UploadHandler) MarkDocumentFailed(c *gin.Context) {
+	var req dto.MarkDocumentFailedRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	err := h.service.FailUpload(c.Request.Context(), req.DocumentID, req.UserID, req.IdempotencyKey, req.FailedReason)
+	err := h.service.MarkDocumentFailed(
+		c.Request.Context(),
+		req.DocumentID,
+		req.UserID,
+		model.FailureStage(req.FailureStage),
+		req.FailureReason,
+	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(httpStatusFromError(err), gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "upload marked as failed",
+		"message": "document marked as failed",
 	})
 }
 
@@ -87,9 +96,9 @@ func (h *UploadHandler) FinalizeUpload(c *gin.Context) {
 		return
 	}
 
-	err := h.service.FinilizeUpload(c.Request.Context(), req.DocumentID)
+	err := h.service.FinalizeUpload(c.Request.Context(), req.DocumentID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(httpStatusFromError(err), gin.H{"error": err.Error()})
 		return
 	}
 
@@ -101,18 +110,96 @@ func (h *UploadHandler) FinalizeUpload(c *gin.Context) {
 // -------------------- GET DOCUMENT --------------------
 
 func (h *UploadHandler) GetDocument(c *gin.Context) {
-	var req dto.GetDocumentRequest
+	var query struct {
+		UserID string `form:"user_id" binding:"required"`
+	}
 
-	if err := c.ShouldBindQuery(&req); err != nil {
+	if err := c.ShouldBindQuery(&query); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
+	req := dto.GetDocumentRequest{
+		DocumentID: c.Param("id"),
+		UserID:     query.UserID,
+	}
+
 	res, err := h.service.GetDocument(c.Request.Context(), req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(httpStatusFromError(err), gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, res)
+}
+
+// httpStatusFromError maps domain errors to their correct HTTP status codes.
+// Uses errors.As to correctly handle wrapped errors.
+func httpStatusFromError(err error) int {
+	var notFound *model.DocumentNotFoundError
+	if errors.As(err, &notFound) {
+		return http.StatusNotFound
+	}
+
+	var unauthorized *model.UnauthorizedDocumentError
+	if errors.As(err, &unauthorized) {
+		return http.StatusForbidden
+	}
+
+	var idempotencyMismatch *model.IdempotencyKeyMismatchError
+	if errors.As(err, &idempotencyMismatch) {
+		return http.StatusConflict
+	}
+
+	var idempotencyReuse *model.IdempotencyKeyReuseError
+	if errors.As(err, &idempotencyReuse) {
+		return http.StatusConflict
+	}
+
+	var invalidFailureStage *model.InvalidFailureStageError
+	if errors.As(err, &invalidFailureStage) {
+		return http.StatusBadRequest
+	}
+
+	var unsupportedContentType *model.UnsupportedContentTypeError
+	if errors.As(err, &unsupportedContentType) {
+		return http.StatusBadRequest
+	}
+
+	var fileSizeExceeded *model.FileSizeExceededError
+	if errors.As(err, &fileSizeExceeded) {
+		return http.StatusBadRequest
+	}
+
+	var invalidIdentifier *model.InvalidIdentifierError
+	if errors.As(err, &invalidIdentifier) {
+		return http.StatusBadRequest
+	}
+
+	var validationErrors validator.ValidationErrors
+	if errors.As(err, &validationErrors) {
+		return http.StatusBadRequest
+	}
+
+	var conflict *model.InvalidStateTransitionError
+	if errors.As(err, &conflict) {
+		return http.StatusConflict
+	}
+
+	var sizeMismatch *model.FileSizeMismatchError
+	if errors.As(err, &sizeMismatch) {
+		return http.StatusUnprocessableEntity
+	}
+
+	var contentMismatch *model.FileContentMismatchError
+	if errors.As(err, &contentMismatch) {
+		return http.StatusUnprocessableEntity
+	}
+
+	var unprocessable *model.FileNotFoundInStorageError
+	if errors.As(err, &unprocessable) {
+		return http.StatusUnprocessableEntity
+	}
+
+	return http.StatusInternalServerError
 }

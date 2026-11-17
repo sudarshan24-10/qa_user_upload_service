@@ -1,7 +1,8 @@
 package database
 
 import (
-	"log"
+	"context"
+	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -15,14 +16,20 @@ type Factory struct {
 func NewFactory(postgresURL, mongoURL string) (*Factory, error) {
 	pg, err := initPostgres(postgresURL)
 	if err != nil {
-		log.Fatal(`Failed to connect to Postgres: `, err)
+		return nil, fmt.Errorf("failed to connect to Postgres: %w", err)
 	}
 	mongoClient, err := initMongo(mongoURL)
 	if err != nil {
-		log.Fatal(`Failed to connect to MongoDB: `, err)
+		pg.Close()
+		return nil, fmt.Errorf("failed to connect to MongoDB: %w", err)
 	}
 	return &Factory{
 		PostgresDB: pg,
 		MongoDB:    mongoClient,
 	}, nil
+}
+
+func (f *Factory) Close(ctx context.Context) error {
+	f.PostgresDB.Close()
+	return f.MongoDB.Disconnect(ctx)
 }
